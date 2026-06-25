@@ -112,3 +112,8 @@ GitHub Webhook ──► FastAPI Server ──► Anthropic Claude API
 4. Open a Pull Request — AutoReview will review it automatically 🤖
 
 ---
+TEAM - Code Gaudrians (Dev Gathering 2k26)
+Mohit Goswami 
+Muskan Arora
+Khushi Arora
+Manish Pal
