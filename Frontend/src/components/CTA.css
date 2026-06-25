@@ -1,0 +1,118 @@
+/* ============================================================
+   CTA Section
+   ============================================================ */
+.cta {
+  padding: var(--space-24) 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.cta__inner {
+  position: relative;
+  background: var(--gradient-cta);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-20) var(--space-8);
+  text-align: center;
+  overflow: hidden;
+  border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+/* Glow behind CTA */
+.cta__inner::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(ellipse, rgba(139, 92, 246, 0.2) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.cta__inner::after {
+  content: '';
+  position: absolute;
+  bottom: -50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 500px;
+  height: 300px;
+  background: radial-gradient(ellipse, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.cta__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.cta__title {
+  font-size: var(--font-size-4xl);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  max-width: 560px;
+}
+
+.cta__subtitle {
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  max-width: 480px;
+  line-height: 1.6;
+}
+
+.cta__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.cta__btn-primary {
+  padding: 14px 32px;
+  background: var(--gradient-purple-btn);
+  color: white;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
+  transition: all var(--transition-base);
+}
+
+.cta__btn-primary:hover {
+  box-shadow: 0 8px 32px rgba(124, 58, 237, 0.55);
+  transform: translateY(-2px);
+}
+
+.cta__btn-secondary {
+  padding: 14px 32px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  transition: color var(--transition-fast);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--text-muted);
+}
+
+.cta__btn-secondary:hover {
+  color: var(--text-primary);
+  text-decoration-color: var(--text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .cta__inner {
+    padding: var(--space-12) var(--space-6);
+  }
+
+  .cta__actions {
+    flex-direction: column;
+  }
+}
