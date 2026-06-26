@@ -1,8 +1,40 @@
-import { Link } from 'react-router-dom'
-import { Sparkles, ArrowRight, CreditCard, Clock, ShieldCheck, CheckCircle, GitBranch } from 'lucide-react'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Sparkles, ArrowRight, CreditCard, Clock, ShieldCheck, CheckCircle, GitBranch, Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { analyzePr } from '../services/api'
 
 function Hero() {
+  const [prUrl, setPrUrl] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const navigate = useNavigate()
+
+  const handleAnalyze = async (e) => {
+    e.preventDefault()
+    const trimmed = prUrl.trim()
+    if (!trimmed) return
+
+    // Basic client-side validation
+    if (!trimmed.includes('github.com') || !trimmed.includes('/pull/')) {
+      setError('Please enter a valid GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)')
+      return
+    }
+
+    setError('')
+    setSubmitting(true)
+
+    try {
+      const result = await analyzePr(trimmed)
+      // Navigate to the analyze page to show live progress
+      navigate(`/analyze?review_id=${result.review_id}`)
+    } catch (err) {
+      setError(err.message || 'Failed to submit PR for analysis')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <section className="relative min-h-screen flex items-center pt-32 pb-16 overflow-hidden">
       {/* Ambient background glow */}
@@ -43,25 +75,47 @@ function Hero() {
             gets cold.
           </motion.p>
 
-          <motion.div 
+          <motion.form 
+            onSubmit={handleAnalyze}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            className="flex items-center bg-[#16161f] border border-white/10 rounded-lg p-1.5 max-w-md w-full focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition-all"
+            className="flex flex-col gap-2 max-w-md w-full"
           >
-            <span className="text-gray-500 ml-3 mr-2 shrink-0">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-            </span>
-            <input
-              type="text"
-              placeholder="Paste GitHub PR link..."
-              className="flex-1 bg-transparent border-none outline-none text-sm text-gray-300 py-2 min-w-0"
-            />
-            <Link to="/dashboard" className="btn-primary shrink-0">
-              Analyze PR
-              <ArrowRight size={14} />
-            </Link>
-          </motion.div>
+            <div className="flex items-center bg-[#16161f] border border-white/10 rounded-lg p-1.5 w-full focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+              <span className="text-gray-500 ml-3 mr-2 shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+              </span>
+              <input
+                type="text"
+                placeholder="Paste GitHub PR link..."
+                value={prUrl}
+                onChange={(e) => { setPrUrl(e.target.value); setError('') }}
+                className="flex-1 bg-transparent border-none outline-none text-sm text-gray-300 py-2 min-w-0"
+                disabled={submitting}
+              />
+              <button 
+                type="submit"
+                disabled={submitting || !prUrl.trim()}
+                className="btn-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    Analyze PR
+                    <ArrowRight size={14} />
+                  </>
+                )}
+              </button>
+            </div>
+            {error && (
+              <p className="text-red-400 text-xs px-2">{error}</p>
+            )}
+          </motion.form>
 
           <motion.div 
             initial={{ opacity: 0, y: 20 }}

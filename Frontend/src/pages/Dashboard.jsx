@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { getReviews, getStats } from '../services/api'
+import { getReviews, getStats, deleteReview } from '../services/api'
 import { formatDistanceToNow, parseISO } from 'date-fns'
-import { Activity, Bug, GitMerge, ShieldAlert, Loader2, ArrowUpRight, Search, FileText } from 'lucide-react'
+import { Activity, Bug, GitMerge, ShieldAlert, Loader2, ArrowUpRight, Search, FileText, Trash2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 
 function Dashboard() {
@@ -11,24 +11,46 @@ function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [reviewsData, statsData] = await Promise.all([
-          getReviews(),
-          getStats()
-        ])
-        setReviews(reviewsData.reviews || [])
-        setStats(statsData)
-      } catch (error) {
-        console.error("Failed to fetch dashboard data:", error)
-      } finally {
-        setLoading(false)
-      }
+  async function refreshData() {
+    try {
+      const [reviewsData, statsData] = await Promise.all([
+        getReviews(),
+        getStats()
+      ])
+      setReviews(reviewsData.reviews || [])
+      setStats(statsData)
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error)
     }
-    
-    fetchData()
+  }
+
+  useEffect(() => {
+    refreshData().finally(() => {
+      setLoading(false)
+    })
   }, [])
+
+  // Poll dashboard data if there are any pending reviews
+  useEffect(() => {
+    const hasPending = reviews.some(r => r.status === 'pending')
+    if (!hasPending) return
+
+    const interval = setInterval(() => {
+      refreshData()
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [reviews])
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this review report?")) return
+    try {
+      await deleteReview(id)
+      await refreshData()
+    } catch (error) {
+      alert("Failed to delete review: " + error.message)
+    }
+  }
 
   const filteredReviews = reviews.filter(r => 
     r.pr_title.toLowerCase().includes(search.toLowerCase()) || 
@@ -54,15 +76,23 @@ function Dashboard() {
             <p className="text-gray-400 text-sm">Welcome back. Here's a summary of your recent AI PR reviews.</p>
           </div>
           
-          <div className="flex items-center bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 w-full md:w-64 focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/40 transition-all">
-            <Search size={16} className="text-gray-500 mr-2" />
-            <input 
-              type="text" 
-              placeholder="Search PRs..." 
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm text-gray-300 w-full"
-            />
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="flex items-center bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 w-full md:w-64 focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/40 transition-all">
+              <Search size={16} className="text-gray-500 mr-2" />
+              <input 
+                type="text" 
+                placeholder="Search PRs..." 
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm text-gray-300 w-full"
+              />
+            </div>
+            <Link 
+              to="/analyze" 
+              className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg font-medium text-sm transition-all whitespace-nowrap"
+            >
+              Analyze New PR
+            </Link>
           </div>
         </div>
 
@@ -176,13 +206,22 @@ function Dashboard() {
                       <td className="px-6 py-4 text-gray-400">
                         {formatDistanceToNow(parseISO(review.created_at), { addSuffix: true })}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <Link 
-                          to={`/review/${review.id}`}
-                          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-purple-400 transition-colors"
-                        >
-                          View Report <ArrowUpRight size={14} />
-                        </Link>
+                      <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-3">
+                          <Link 
+                            to={`/review/${review.id}`}
+                            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-purple-400 transition-colors"
+                          >
+                            View Report <ArrowUpRight size={14} />
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(review.id)}
+                            className="text-gray-500 hover:text-red-400 transition-colors p-1"
+                            title="Delete Review"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

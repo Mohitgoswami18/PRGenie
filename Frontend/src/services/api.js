@@ -68,24 +68,74 @@ export const getStats = async () => {
   } catch (error) {
     console.warn('Backend unavailable, using mock data for stats', error);
     return {
-      total_reviews: 142,
-      bugs_caught: 312,
-      security_issues_prevented: 45,
-      avg_review_time: '0.4s',
+      total_reviews: mockReviews.length,
+      bugs_caught: mockReviews.reduce((sum, r) => sum + r.bugs_found, 0),
+      security_issues_prevented: mockReviews.reduce((sum, r) => sum + r.security_issues, 0),
+      avg_review_time: '< 1s',
     };
   }
 };
 
-export const analyzePr = async (prUrl) => {
+export const analyzePr = async (prUrl, mode = 'balanced') => {
   try {
-    const response = await api.post('/analyze', { pr_url: prUrl });
+    const response = await api.post('/analyze', { pr_url: prUrl, mode });
     return response.data;
   } catch (error) {
-    console.warn('Backend unavailable, simulating PR analysis', error);
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({ status: 'queued', message: 'Analysis started (mock)' });
-      }, 1500);
-    });
+    // Surface backend error message if available
+    const detail = error?.response?.data?.detail;
+    if (detail) {
+      throw new Error(detail);
+    }
+    throw new Error(error.message || 'Failed to submit PR for analysis');
   }
+};
+
+export const deleteReview = async (id) => {
+  try {
+    const response = await api.delete(`/reviews/${id}`);
+    return response.data;
+  } catch (error) {
+    console.warn(`Failed to delete review ${id}`, error);
+    throw error;
+  }
+};
+
+/**
+ * Poll a review by ID until its status is no longer "pending".
+ * Calls `onUpdate(review)` each poll and resolves with the final review.
+ *
+ * @param {number} reviewId
+ * @param {function} onUpdate - called on each successful poll
+ * @param {number} intervalMs - poll interval (default 2s)
+ * @param {number} maxAttempts - max polls before giving up (default 60 = 2min)
+ * @returns {Promise<object>} the completed review object
+ */
+export const pollReviewStatus = (reviewId, onUpdate, intervalMs = 2000, maxAttempts = 60) => {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+      try {
+        const review = await getReviewById(reviewId);
+        if (onUpdate) onUpdate(review);
+
+        if (review.status !== 'pending') {
+          resolve(review);
+          return;
+        }
+
+        if (attempts >= maxAttempts) {
+          reject(new Error('Review is taking too long. Please check the dashboard later.'));
+          return;
+        }
+
+        setTimeout(poll, intervalMs);
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    poll();
+  });
 };
