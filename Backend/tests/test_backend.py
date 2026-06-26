@@ -209,6 +209,54 @@ class TestBackendAPI(unittest.TestCase):
         no_token_response = self.client.get("/api/auth/me")
         self.assertEqual(no_token_response.status_code, 401)
 
+    def test_stats_endpoint(self):
+        # 1. Fetch initial stats (should be empty/0s)
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["total_reviews"], 0)
+        self.assertEqual(data["bugs_caught"], 0)
+        self.assertEqual(data["security_issues_prevented"], 0)
+        self.assertEqual(data["avg_review_time"], "0.0s")
+
+    @patch("Backend.main.GeminiClient")
+    @patch("Backend.main.github_client")
+    def test_analyze_endpoint(self, mock_github, mock_gemini_client_cls):
+        # Configure GitHub metadata and diff mocks
+        mock_github.parse_pr_url.return_value = ("owner/repo", 42)
+        mock_github.fetch_pr_metadata.return_value = {
+            "title": "Add new landing page",
+            "user": {"login": "jane_developer"},
+            "html_url": "https://github.com/owner/repo/pull/42",
+            "diff_url": "https://github.com/owner/repo/pull/42.diff"
+        }
+        mock_github.fetch_diff.return_value = "diff --git a/app.py b/app.py\n+print('hello')"
+
+        mock_gemini_instance = MagicMock()
+        mock_gemini_client_cls.return_value = mock_gemini_instance
+        mock_review_result = ReviewResult(
+            bugs=[],
+            security=[],
+            tests=[],
+            improvements=[],
+            summary="Clean code, looks good."
+        )
+        mock_gemini_instance.review_pr.return_value = mock_review_result
+
+        # Request body
+        payload = {"pr_url": "https://github.com/owner/repo/pull/42"}
+        response = self.client.post("/api/analyze", json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "accepted")
+        self.assertIn("review_id", response.json())
+
+        # Check that review record is in database
+        reviews_response = self.client.get("/api/reviews")
+        reviews_data = reviews_response.json()["reviews"]
+        self.assertEqual(len(reviews_data), 1)
+        self.assertEqual(reviews_data[0]["pr_title"], "Add new landing page")
+        self.assertEqual(reviews_data[0]["pr_author"], "jane_developer")
+
 if __name__ == "__main__":
     unittest.main()
 

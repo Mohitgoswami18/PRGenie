@@ -4,6 +4,7 @@ import Footer from './components/Footer'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ReviewDetail from './pages/ReviewDetail'
+import Login from './pages/Login'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/review/:id" element={<ReviewDetail />} />
+          <Route path="/login" element={<Login />} />
         </Routes>
       </main>
       <Footer />

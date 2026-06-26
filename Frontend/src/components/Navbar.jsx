@@ -4,7 +4,17 @@ import { useState, useEffect } from 'react'
 function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
+  const [userEmail, setUserEmail] = useState(null)
   
+  useEffect(() => {
+    const email = localStorage.getItem('user_email');
+    if (email) {
+      setUserEmail(email);
+    } else {
+      setUserEmail(null);
+    }
+  }, [location])
+
   const isDashboard = location.pathname.includes('/dashboard') || location.pathname.includes('/review')
 
   return (
@@ -27,14 +37,35 @@ function Navbar() {
         )}
 
         <div className="flex items-center gap-4">
-          {!isDashboard && (
-            <Link to="/login" className="hidden lg:block text-sm text-gray-400 hover:text-white transition-colors">
-              Sign In
-            </Link>
+          {userEmail ? (
+            <>
+              <span className="hidden lg:inline text-xs text-gray-400">
+                {userEmail}
+              </span>
+              <button 
+                onClick={() => {
+                  localStorage.removeItem('token');
+                  localStorage.removeItem('user_email');
+                  setUserEmail(null);
+                  window.location.href = '/';
+                }}
+                className="text-sm text-red-400 hover:text-red-300 transition-colors"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <>
+              {!isDashboard && (
+                <Link to="/login" className="hidden lg:block text-sm text-gray-400 hover:text-white transition-colors">
+                  Sign In
+                </Link>
+              )}
+              <Link to="/dashboard" className="btn-primary py-2 px-4 text-xs lg:text-sm">
+                {isDashboard ? 'Go to Repo' : 'Get Started Free'}
+              </Link>
+            </>
           )}
-          <Link to="/dashboard" className="btn-primary py-2 px-4 text-xs lg:text-sm">
-            {isDashboard ? 'Go to Repo' : 'Get Started Free'}
-          </Link>
           
           {!isDashboard && (
             <button 

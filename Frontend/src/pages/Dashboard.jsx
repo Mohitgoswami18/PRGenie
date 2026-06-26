@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { getReviews, getStats } from '../services/api'
+import { getReviews, getStats, analyzePr } from '../services/api'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import { Activity, Bug, GitMerge, ShieldAlert, Loader2, ArrowUpRight, Search, FileText } from 'lucide-react'
 import { motion } from 'framer-motion'
@@ -10,6 +10,30 @@ function Dashboard() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [prUrl, setPrUrl] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const handleAnalyze = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    setAnalyzing(true)
+    try {
+      await analyzePr(prUrl)
+      setSuccess('PR analysis queued successfully! Reloading...')
+      setPrUrl('')
+      setTimeout(() => {
+        window.location.reload()
+      }, 1500)
+    } catch (err) {
+      console.error(err)
+      setError(err.response?.data?.detail || 'Failed to submit PR for analysis.')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
 
   useEffect(() => {
     async function fetchData() {
@@ -65,6 +89,37 @@ function Dashboard() {
             />
           </div>
         </div>
+
+        {/* Analyze PR Card */}
+        <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} className="bg-[#111118] border border-white/10 p-6 rounded-xl mb-8">
+          <h2 className="text-lg font-semibold mb-1">Analyze a Pull Request</h2>
+          <p className="text-gray-400 text-xs mb-4">Paste any public GitHub PR link (e.g. <code>https://github.com/owner/repo/pull/123</code>) to trigger an automated AI review.</p>
+          <form onSubmit={handleAnalyze} className="flex flex-col sm:flex-row gap-3">
+            <input 
+              type="url" 
+              required
+              placeholder="https://github.com/owner/repo/pull/123"
+              value={prUrl}
+              onChange={(e) => setPrUrl(e.target.value)}
+              className="bg-[#16161f] border border-white/10 rounded-lg px-4 py-2 text-sm text-gray-300 flex-1 outline-none focus:border-primary/45 transition-all"
+            />
+            <button 
+              type="submit" 
+              disabled={analyzing}
+              className="btn-primary py-2 px-6 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {analyzing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Analyzing...
+                </>
+              ) : (
+                'Analyze PR'
+              )}
+            </button>
+          </form>
+          {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+          {success && <p className="text-green-400 text-xs mt-2">{success}</p>}
+        </motion.div>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
