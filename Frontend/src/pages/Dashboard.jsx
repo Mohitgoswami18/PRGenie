@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { getReviews, getStats } from '../services/api'
+import { getReviews, getStats, deleteReview } from '../services/api'
 import { formatDistanceToNow, parseISO } from 'date-fns'
-import { Activity, Bug, GitMerge, ShieldAlert, Loader2, ArrowUpRight, Search, FileText } from 'lucide-react'
+import { Activity, Bug, GitMerge, ShieldAlert, Loader2, ArrowUpRight, Search, FileText, Trash2 } from 'lucide-react'
+import { showToast } from '../components/Toast'
 import { motion } from 'framer-motion'
 
 function Dashboard() {
@@ -12,23 +13,37 @@ function Dashboard() {
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [reviewsData, statsData] = await Promise.all([
-          getReviews(),
-          getStats()
-        ])
-        setReviews(reviewsData.reviews || [])
-        setStats(statsData)
-      } catch (error) {
-        console.error("Failed to fetch dashboard data:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    
     fetchData()
   }, [])
+
+  async function fetchData() {
+    setLoading(true)
+    try {
+      const [reviewsData, statsData] = await Promise.all([
+        getReviews(),
+        getStats()
+      ])
+      setReviews(reviewsData.reviews || [])
+      setStats(statsData)
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error)
+      showToast('Failed to load dashboard data', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (window.confirm('Are you sure you want to delete this review?')) {
+      try {
+        await deleteReview(id)
+        showToast('Review deleted successfully')
+        fetchData()
+      } catch (error) {
+        showToast('Failed to delete review', 'error')
+      }
+    }
+  }
 
   const filteredReviews = reviews.filter(r => 
     r.pr_title.toLowerCase().includes(search.toLowerCase()) || 
@@ -177,12 +192,21 @@ function Dashboard() {
                         {formatDistanceToNow(parseISO(review.created_at), { addSuffix: true })}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <Link 
-                          to={`/review/${review.id}`}
-                          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-purple-400 transition-colors"
-                        >
-                          View Report <ArrowUpRight size={14} />
-                        </Link>
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            onClick={() => handleDelete(review.id)}
+                            className="text-gray-500 hover:text-red-400 transition-colors"
+                            title="Delete Review"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                          <Link 
+                            to={`/review/${review.id}`}
+                            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-purple-400 transition-colors"
+                          >
+                            View Report <ArrowUpRight size={14} />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 
 function Hero() {
   return (
-    <section className="relative min-h-screen flex items-center pt-32 pb-16 overflow-hidden">
+    <section id="hero" className="relative min-h-screen flex items-center pt-32 pb-16 overflow-hidden">
       {/* Ambient background glow */}
       <div className="absolute top-[-200px] left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-[radial-gradient(ellipse,rgba(124,58,237,0.12)_0%,transparent_70%)] pointer-events-none z-0"></div>
 
@@ -57,7 +57,7 @@ function Hero() {
               placeholder="Paste GitHub PR link..."
               className="flex-1 bg-transparent border-none outline-none text-sm text-gray-300 py-2 min-w-0"
             />
-            <Link to="/dashboard" className="btn-primary shrink-0">
+            <Link to="/analyze" className="btn-primary shrink-0">
               Analyze PR
               <ArrowRight size={14} />
             </Link>
