@@ -8,6 +8,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,7 @@ from Backend.Database import database, models, crud
 from Backend.Github import github_client
 from Backend.AI.gemini_client import GeminiClient
 from Backend.AI.models import ReviewResult
+from Backend import auth
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +60,24 @@ class ReviewListItem(BaseModel):
 
 class ReviewsResponse(BaseModel):
     reviews: list[ReviewListItem]
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: Optional[str] = None
+    created_at: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
 
 # ---------------------------------------------------------------------------
 # Formatters
@@ -305,3 +325,51 @@ def get_review_by_id(
         status=r.status,
         created_at=created_at_str
     )
+
+# ---------------------------------------------------------------------------
+# User Authentication Routes
+# ---------------------------------------------------------------------------
+
+@app.post("/api/auth/register", response_model=UserResponse)
+def register_user(user: UserCreate, db: Session = Depends(database.get_db)):
+    db_user = crud.get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_pwd = auth.get_password_hash(user.password)
+    new_user = crud.create_user(db, email=user.email, hashed_password=hashed_pwd, full_name=user.full_name)
+    
+    created_at_str = new_user.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if new_user.created_at else ""
+    return UserResponse(
+        id=new_user.id,
+        email=new_user.email,
+        full_name=new_user.full_name,
+        created_at=created_at_str
+    )
+
+@app.post("/api/auth/login", response_model=Token)
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(database.get_db)
+):
+    user = crud.get_user_by_email(db, email=form_data.username)
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token = auth.create_access_token(data={"sub": user.email})
+    return Token(access_token=access_token, token_type="bearer")
+
+@app.get("/api/auth/me", response_model=UserResponse)
+def get_me(current_user: models.User = Depends(auth.get_current_user)):
+    created_at_str = current_user.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if current_user.created_at else ""
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        created_at=created_at_str
+    )
+

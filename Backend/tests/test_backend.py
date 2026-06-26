@@ -152,5 +152,63 @@ class TestBackendAPI(unittest.TestCase):
         self.assertEqual(reviews_data[0]["status"], "error")
         self.assertTrue("GitHub Timeout" in reviews_data[0]["review_text"])
 
+    def test_user_registration_and_login_flow(self):
+        # 1. Register a new user
+        reg_payload = {
+            "email": "user@example.com",
+            "password": "mypassword123",
+            "full_name": "John Doe"
+        }
+        reg_response = self.client.post("/api/auth/register", json=reg_payload)
+        self.assertEqual(reg_response.status_code, 200)
+        reg_data = reg_response.json()
+        self.assertEqual(reg_data["email"], "user@example.com")
+        self.assertEqual(reg_data["full_name"], "John Doe")
+        self.assertIn("id", reg_data)
+        self.assertIn("created_at", reg_data)
+
+        # 2. Registering same email again should fail
+        dup_response = self.client.post("/api/auth/register", json=reg_payload)
+        self.assertEqual(dup_response.status_code, 400)
+        self.assertEqual(dup_response.json()["detail"], "Email already registered")
+
+        # 3. Login with correct credentials
+        login_data = {
+            "username": "user@example.com",
+            "password": "mypassword123"
+        }
+        login_response = self.client.post("/api/auth/login", data=login_data)
+        self.assertEqual(login_response.status_code, 200)
+        token_data = login_response.json()
+        self.assertIn("access_token", token_data)
+        self.assertEqual(token_data["token_type"], "bearer")
+        token = token_data["access_token"]
+
+        # 4. Login with incorrect credentials
+        bad_login_data = {
+            "username": "user@example.com",
+            "password": "wrongpassword"
+        }
+        bad_login_response = self.client.post("/api/auth/login", data=bad_login_data)
+        self.assertEqual(bad_login_response.status_code, 401)
+
+        # 5. Access protected /api/auth/me endpoint
+        headers = {"Authorization": f"Bearer {token}"}
+        me_response = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me_response.status_code, 200)
+        me_data = me_response.json()
+        self.assertEqual(me_data["email"], "user@example.com")
+        self.assertEqual(me_data["full_name"], "John Doe")
+
+        # 6. Access /api/auth/me with invalid token
+        bad_headers = {"Authorization": "Bearer invalidtoken123"}
+        bad_me_response = self.client.get("/api/auth/me", headers=bad_headers)
+        self.assertEqual(bad_me_response.status_code, 401)
+
+        # 7. Access /api/auth/me without token
+        no_token_response = self.client.get("/api/auth/me")
+        self.assertEqual(no_token_response.status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()
+

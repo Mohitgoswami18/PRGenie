@@ -58,3 +58,23 @@ def get_reviews(db: Session, skip: int = 0, limit: int = 100) -> list[models.Rev
 
 def get_review_by_id(db: Session, review_id: int) -> models.Review | None:
     return db.query(models.Review).filter(models.Review.id == review_id).first()
+
+def get_user_by_id(db: Session, user_id: int) -> models.User | None:
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+def get_user_by_email(db: Session, email: str) -> models.User | None:
+    return db.query(models.User).filter(models.User.email == email).first()
+
+def create_user(db: Session, email: str, hashed_password: str, full_name: str | None = None) -> models.User:
+    db_user = models.User(
+        email=email,
+        hashed_password=hashed_password,
+        full_name=full_name,
+        is_active=True,
+        created_at=datetime.utcnow()
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
