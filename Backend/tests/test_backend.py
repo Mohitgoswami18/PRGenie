@@ -1,0 +1,156 @@
+import os
+import sys
+import unittest
+from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+# Fix import paths
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+from Backend.Database.database import Base, get_db
+from Backend.main import app
+from Backend.AI.models import ReviewResult, Finding
+
+# Setup test database
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test_prgenie.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def override_get_db():
+    try:
+        db = TestingSessionLocal()
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
+
+class TestBackendAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Overwrite the production database session and engine with test ones
+        from Backend.Database import database as db_mod
+        db_mod.SessionLocal = TestingSessionLocal
+        db_mod.engine = engine
+
+        Base.metadata.create_all(bind=engine)
+        cls.client = TestClient(app)
+
+    @classmethod
+    def tearDownClass(cls):
+        Base.metadata.drop_all(bind=engine)
+        import os
+        if os.path.exists("./test_prgenie.db"):
+            try:
+                os.remove("./test_prgenie.db")
+            except OSError:
+                pass
+
+    def setUp(self):
+        # Clean db tables between tests if needed, but recreate for simplicity
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+
+    def test_health_check(self):
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+
+    @patch("Backend.main.GeminiClient")
+    @patch("Backend.main.github_client")
+    def test_webhook_flow(self, mock_github, mock_gemini_client_cls):
+        # Configure GitHub and Gemini mocks
+        mock_github.fetch_diff.return_value = "diff --git a/test.py b/test.py\n+print('hello')"
+        
+        mock_gemini_instance = MagicMock()
+        mock_gemini_client_cls.return_value = mock_gemini_instance
+        
+        mock_review_result = ReviewResult(
+            bugs=[Finding(description="Null pointer error", file="test.py", line=1, severity="critical", suggestion="Fix it")],
+            security=[],
+            tests=[],
+            improvements=[],
+            summary="Tested review."
+        )
+        mock_gemini_instance.review_pr.return_value = mock_review_result
+
+        # Webhook payload
+        payload = {
+            "action": "opened",
+            "number": 42,
+            "pull_request": {
+                "title": "Fix login bug",
+                "html_url": "https://github.com/myteam/my-repo/pull/42",
+                "user": {"login": "alice"},
+                "diff_url": "https://github.com/myteam/my-repo/pull/42.diff"
+            },
+            "repository": {
+                "full_name": "myteam/my-repo"
+            }
+        }
+
+        # Call webhook
+        headers = {"X-GitHub-Event": "pull_request"}
+        response = self.client.post("/webhook", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "accepted")
+
+        # Verify review in database via GET /api/reviews
+        reviews_response = self.client.get("/api/reviews")
+        self.assertEqual(reviews_response.status_code, 200)
+        reviews_data = reviews_response.json()["reviews"]
+        self.assertEqual(len(reviews_data), 1)
+        
+        review = reviews_data[0]
+        self.assertEqual(review["repo_full_name"], "myteam/my-repo")
+        self.assertEqual(review["pr_number"], 42)
+        self.assertEqual(review["pr_title"], "Fix login bug")
+        self.assertEqual(review["pr_author"], "alice")
+        self.assertEqual(review["status"], "complete")
+        self.assertEqual(review["bugs_found"], 1)
+        self.assertEqual(review["security_issues"], 0)
+        self.assertTrue("AutoReview AI PR Feedback" in review["review_text"])
+        self.assertTrue("Null pointer error" in review["review_text"])
+        
+        # Test specific GET by ID
+        review_id = review["id"]
+        detail_response = self.client.get(f"/api/reviews/{review_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["id"], review_id)
+
+    @patch("Backend.main.GeminiClient")
+    @patch("Backend.main.github_client")
+    def test_webhook_error_handling(self, mock_github, mock_gemini_client_cls):
+        # Configure GitHub to raise exception to test error workflow
+        mock_github.fetch_diff.side_effect = Exception("GitHub Timeout")
+        
+        payload = {
+            "action": "opened",
+            "number": 101,
+            "pull_request": {
+                "title": "Error test",
+                "html_url": "https://github.com/myteam/my-repo/pull/101",
+                "user": {"login": "bob"},
+                "diff_url": "https://github.com/myteam/my-repo/pull/101.diff"
+            },
+            "repository": {
+                "full_name": "myteam/my-repo"
+            }
+        }
+
+        headers = {"X-GitHub-Event": "pull_request"}
+        response = self.client.post("/webhook", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        
+        # Check review is marked as error
+        reviews_response = self.client.get("/api/reviews")
+        self.assertEqual(reviews_response.status_code, 200)
+        reviews_data = reviews_response.json()["reviews"]
+        self.assertEqual(len(reviews_data), 1)
+        self.assertEqual(reviews_data[0]["status"], "error")
+        self.assertTrue("GitHub Timeout" in reviews_data[0]["review_text"])
+
+if __name__ == "__main__":
+    unittest.main()
