@@ -1,0 +1,11 @@
+# PRGenie AI Module — Python dependencies
+# Install with:  pip install -r requirements.txt
+
+# Google Gemini SDK (API-key auth, NOT Vertex AI)
+google-genai>=1.0.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
