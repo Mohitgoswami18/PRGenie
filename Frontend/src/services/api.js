@@ -11,7 +11,7 @@ const api = axios.create({
 
 // Request interceptor to attach token
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('prgenie_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -92,30 +92,76 @@ export const analyzePr = async (prUrl) => {
   return response.data;
 };
 
-export const login = async (email, password) => {
+export const deleteReview = async (id) => {
+  const response = await api.delete(`/reviews/${id}`);
+  return response.data;
+};
+
+export const analyzeRepo = async (repoUrl, prUrl) => {
+  const response = await api.post('/analyze', { repoUrl, prUrl });
+  return response.data;
+};
+
+// ---------------------------------------------------------------------------
+// Auth Translation Layer for FastAPI
+// ---------------------------------------------------------------------------
+export const signup = async (name, email, password) => {
+  const user = await api.post('/auth/register', { email, password, full_name: name });
+  
+  const params = new URLSearchParams();
+  params.append('username', email);
+  params.append('password', password);
+  const loginRes = await api.post('/auth/login', params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  
+  return {
+    token: loginRes.data.access_token,
+    user: {
+      id: user.data.id,
+      email: user.data.email,
+      name: user.data.full_name
+    }
+  };
+};
+
+export const signin = async (email, password) => {
   const params = new URLSearchParams();
   params.append('username', email);
   params.append('password', password);
   
   const response = await api.post('/auth/login', params, {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    }
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   });
-  return response.data;
+  
+  const token = response.data.access_token;
+  const meResponse = await api.get('/auth/me', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  
+  return {
+    token: token,
+    user: {
+      id: meResponse.data.id,
+      email: meResponse.data.email,
+      name: meResponse.data.full_name
+    }
+  };
 };
 
-export const register = async (userData) => {
-  const response = await api.post('/auth/register', userData);
-  return response.data;
-};
-
-export const getMe = async () => {
-  const response = await api.get('/auth/me');
-  return response.data;
+export const getMe = async (token) => {
+  const response = await api.get('/auth/me', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return {
+    user: {
+      id: response.data.id,
+      email: response.data.email,
+      name: response.data.full_name
+    }
+  };
 };
 
 export const logout = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user_email');
+  localStorage.removeItem('prgenie_token');
 };

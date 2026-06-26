@@ -6,7 +6,7 @@ const supportLinks = ['Help Center', 'Blog', 'API Status', 'Community']
 
 function Footer() {
   return (
-    <footer className="bg-[#0f0f17] border-t border-white/10 pt-16 pb-8" id="footer">
+    <footer className="bg-[#0f0f17] border-t border-white/10 pt-16 pb-8" id="about-us">
       <div className="container mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 mb-12">
           {/* Brand */}
