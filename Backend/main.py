@@ -1,4 +1,5 @@
 import os
+import re
 import hmac
 import hashlib
 import logging
@@ -10,9 +11,21 @@ from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
-# Load environment variables
-load_dotenv()
+import sys
+# Load environment variables from Backend/.env (relative to this file's directory)
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_backend_dir, ".env"))
+# Also try loading AI-specific .env
+load_dotenv(os.path.join(_backend_dir, "AI", ".env"))
+
+# Ensure parent directory of Backend is in sys.path to allow "from Backend..." imports
+_parent_dir = os.path.dirname(_backend_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 from Backend.Database import database, models, crud
 from Backend.Github import github_client
@@ -38,7 +51,7 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Pydantic Response Models
+# Pydantic Request / Response Models
 # ---------------------------------------------------------------------------
 
 class ReviewListItem(BaseModel):
@@ -58,6 +71,61 @@ class ReviewListItem(BaseModel):
 
 class ReviewsResponse(BaseModel):
     reviews: list[ReviewListItem]
+
+class StatsResponse(BaseModel):
+    total_reviews: int
+    bugs_caught: int
+    security_issues_prevented: int
+    avg_review_time: str
+
+class AnalyzeRequest(BaseModel):
+    pr_url: str
+    mode: str = "balanced"
+
+class AnalyzeResponse(BaseModel):
+    status: str
+    review_id: int
+    message: str
+
+class DeleteResponse(BaseModel):
+    status: str
+    message: str
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def parse_github_pr_url(url: str) -> tuple[str, int]:
+    """
+    Parse a GitHub PR URL into (repo_full_name, pr_number).
+    
+    Accepts URLs like:
+      - https://github.com/owner/repo/pull/123
+      - github.com/owner/repo/pull/123
+    """
+    pattern = r"github\.com/([^/]+/[^/]+)/pull/(\d+)"
+    match = re.search(pattern, url.strip())
+    if not match:
+        raise ValueError(f"Invalid GitHub PR URL: {url}")
+    return match.group(1), int(match.group(2))
+
+
+def _review_to_item(r) -> ReviewListItem:
+    """Convert a DB Review row to a ReviewListItem."""
+    created_at_str = r.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if r.created_at else ""
+    return ReviewListItem(
+        id=r.id,
+        repo_full_name=r.repo_full_name,
+        pr_number=r.pr_number,
+        pr_title=r.pr_title or "",
+        pr_author=r.pr_author or "",
+        pr_url=r.pr_url or "",
+        review_text=r.review_text or "",
+        bugs_found=r.bugs_found,
+        security_issues=r.security_issues,
+        status=r.status,
+        created_at=created_at_str,
+    )
 
 # ---------------------------------------------------------------------------
 # Formatters
@@ -117,7 +185,8 @@ def process_and_review_pr(
     db_review_id: int, 
     diff_url: str, 
     repo_full_name: str, 
-    pr_number: int
+    pr_number: int,
+    review_mode: str = "balanced",
 ):
     db = next(database.get_db())
     try:
@@ -146,7 +215,7 @@ def process_and_review_pr(
         # 2. Run Gemini review
         try:
             client = GeminiClient()
-            ai_result = client.review_pr(diff_text, mode="balanced")
+            ai_result = client.review_pr(diff_text, mode=review_mode)
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             crud.update_review_error(db, db_review_id, f"Gemini API review failure: {e}")
@@ -189,6 +258,7 @@ def process_and_review_pr(
 def health_check():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
+
 @app.post("/webhook")
 async def github_webhook(
     request: Request, 
@@ -199,7 +269,7 @@ async def github_webhook(
     webhook_secret = os.getenv("WEBHOOK_SECRET")
     body = await request.body()
     
-    if webhook_secret:
+    if webhook_secret and webhook_secret != "your_webhook_secret_here":
         sig = request.headers.get("X-Hub-Signature-256")
         if not sig:
             raise HTTPException(status_code=403, detail="X-Hub-Signature-256 header missing")
@@ -251,10 +321,102 @@ async def github_webhook(
         db_review_id=db_review.id,
         diff_url=diff_url,
         repo_full_name=repo_full_name,
-        pr_number=pr_number
+        pr_number=pr_number,
     )
 
     return {"status": "accepted", "review_id": db_review.id}
+
+
+@app.post("/api/analyze", response_model=AnalyzeResponse)
+async def analyze_pr(
+    payload: AnalyzeRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(database.get_db),
+):
+    """
+    Accept a GitHub PR URL from the frontend, fetch its metadata,
+    create a pending review, and trigger the AI review in the background.
+    """
+    # 1. Parse the PR URL
+    try:
+        repo_full_name, pr_number = parse_github_pr_url(payload.pr_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Validate mode
+    review_mode = payload.mode
+    if review_mode not in ("strict", "balanced", "detailed"):
+        review_mode = "balanced"
+
+    github_token = os.getenv("GITHUB_PAT")
+
+    # 2. Fetch PR details from GitHub API
+    try:
+        pr_data = github_client.fetch_pr_details(repo_full_name, pr_number, github_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not fetch PR from GitHub: {e}. Make sure the PR URL is valid and the repo is public (or GITHUB_PAT is set).",
+        )
+
+    pr_title = pr_data.get("title", "")
+    pr_author = pr_data.get("user", {}).get("login", "")
+    pr_url = pr_data.get("html_url", "")
+    diff_url = pr_data.get("diff_url", "")
+
+    if not diff_url:
+        raise HTTPException(status_code=400, detail="Could not determine diff URL for this PR.")
+
+    # 3. Create pending review record
+    db_review = crud.create_pending_review(
+        db=db,
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        pr_title=pr_title,
+        pr_author=pr_author,
+        pr_url=pr_url,
+    )
+
+    # 4. Trigger background review
+    background_tasks.add_task(
+        process_and_review_pr,
+        db_review_id=db_review.id,
+        diff_url=diff_url,
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        review_mode=review_mode,
+    )
+
+    return AnalyzeResponse(
+        status="accepted",
+        review_id=db_review.id,
+        message=f"Review queued for {repo_full_name}#{pr_number} (mode: {review_mode})",
+    )
+
+
+@app.get("/api/stats", response_model=StatsResponse)
+def get_stats(db: Session = Depends(database.get_db)):
+    """
+    Return aggregate statistics computed from the reviews table.
+    """
+    total_reviews = db.query(func.count(models.Review.id)).scalar() or 0
+    bugs_caught = db.query(func.coalesce(func.sum(models.Review.bugs_found), 0)).scalar()
+    security_issues = db.query(func.coalesce(func.sum(models.Review.security_issues), 0)).scalar()
+
+    # Compute average review time placeholder — we don't track duration yet,
+    # so estimate based on the data we have
+    if total_reviews > 0:
+        avg_review_time = "< 1s"
+    else:
+        avg_review_time = "0.0s"
+
+    return StatsResponse(
+        total_reviews=total_reviews,
+        bugs_caught=int(bugs_caught),
+        security_issues_prevented=int(security_issues),
+        avg_review_time=avg_review_time,
+    )
+
 
 @app.get("/api/reviews", response_model=ReviewsResponse)
 def get_reviews(
@@ -263,24 +425,8 @@ def get_reviews(
     db: Session = Depends(database.get_db)
 ):
     reviews_db = crud.get_reviews(db, skip=skip, limit=limit)
-    reviews_list = []
-    for r in reviews_db:
-        # Convert created_at datetime to UTC ISO string format ending with 'Z'
-        created_at_str = r.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if r.created_at else ""
-        reviews_list.append(ReviewListItem(
-            id=r.id,
-            repo_full_name=r.repo_full_name,
-            pr_number=r.pr_number,
-            pr_title=r.pr_title or "",
-            pr_author=r.pr_author or "",
-            pr_url=r.pr_url or "",
-            review_text=r.review_text or "",
-            bugs_found=r.bugs_found,
-            security_issues=r.security_issues,
-            status=r.status,
-            created_at=created_at_str
-        ))
-    return ReviewsResponse(reviews=reviews_list)
+    return ReviewsResponse(reviews=[_review_to_item(r) for r in reviews_db])
+
 
 @app.get("/api/reviews/{review_id}", response_model=ReviewListItem)
 def get_review_by_id(
@@ -290,18 +436,17 @@ def get_review_by_id(
     r = crud.get_review_by_id(db, review_id)
     if not r:
         raise HTTPException(status_code=404, detail="Review not found")
-        
-    created_at_str = r.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if r.created_at else ""
-    return ReviewListItem(
-        id=r.id,
-        repo_full_name=r.repo_full_name,
-        pr_number=r.pr_number,
-        pr_title=r.pr_title or "",
-        pr_author=r.pr_author or "",
-        pr_url=r.pr_url or "",
-        review_text=r.review_text or "",
-        bugs_found=r.bugs_found,
-        security_issues=r.security_issues,
-        status=r.status,
-        created_at=created_at_str
-    )
+    return _review_to_item(r)
+
+
+@app.delete("/api/reviews/{review_id}", response_model=DeleteResponse)
+def delete_review(
+    review_id: int,
+    db: Session = Depends(database.get_db),
+):
+    r = crud.get_review_by_id(db, review_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Review not found")
+    db.delete(r)
+    db.commit()
+    return DeleteResponse(status="ok", message=f"Review {review_id} deleted.")

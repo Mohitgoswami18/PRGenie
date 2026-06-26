@@ -4,6 +4,7 @@ import Footer from './components/Footer'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ReviewDetail from './pages/ReviewDetail'
+import AnalyzePage from './pages/AnalyzePage'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/analyze" element={<AnalyzePage />} />
           <Route path="/review/:id" element={<ReviewDetail />} />
         </Routes>
       </main>
